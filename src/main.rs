@@ -31,13 +31,14 @@ fn main() {
                     Some(input) => {
                         let cmd_array = deserialize_array_command(&input).unwrap();
                         let cmd = cmd_array[0].clone().unwrap();
-                        if cmd == "PING" {
-                            stream.write("+PONG\r\n".as_bytes()).unwrap();
-                        } else {
-                            stream
-                                .write("-UNKNOWN_COMMAND_TYPE\r\n".as_bytes())
-                                .unwrap();
-                        }
+                        stream.write("+PONG\r\n".as_bytes()).unwrap();
+                        // if cmd == "PING" {
+                        //     stream.write("+PONG\r\n".as_bytes()).unwrap();
+                        // } else {
+                        //     stream
+                        //         .write("-UNKNOWN_COMMAND_TYPE\r\n".as_bytes())
+                        //         .unwrap();
+                        // }
                     }
                     None => {
                         println!("invalid input");
