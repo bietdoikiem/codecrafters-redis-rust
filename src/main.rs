@@ -26,25 +26,32 @@ fn main() {
         match stream {
             Ok(mut stream) => {
                 println!("accepted new connection");
-                let user_input = get_stream_input_str(&mut stream);
-                match user_input {
-                    Some(input) => {
-                        let cmd_array = deserialize_array_command(&input).unwrap();
-                        let cmd = cmd_array[0].clone().unwrap();
-                        stream.write("+PONG\r\n".as_bytes()).unwrap();
-                        if cmd == "PING" {
-                            stream.write("+PONG\r\n".as_bytes()).unwrap();
-                        } else {
-                            stream.write("+PONG\r\n".as_bytes()).unwrap();
+                loop {
+                    let user_input = get_stream_input_str(&mut stream);
+                    match user_input {
+                        Ok(input) => {
+                            //println!("raw input: {}", input);
+                            let cmd_array = deserialize_array_command(&input).unwrap();
+                            let cmd = cmd_array[0].clone().unwrap();
+                            // println!("cmd: {:?}", cmd);
+
+                            // Response
+                            if cmd == "PING" {
+                                stream.write("+PONG\r\n".as_bytes()).unwrap();
+                            } else {
+                                stream.write("+PONG\r\n".as_bytes()).unwrap();
+                            }
+                            stream.flush().unwrap();
                         }
-                    }
-                    None => {
-                        println!("invalid input");
+                        Err(e) => {
+                            eprintln!("Error getting input: {e}");
+                            break;
+                        }
                     }
                 }
             }
             Err(e) => {
-                println!("error: {}", e);
+                eprintln!("error: {e}");
             }
         }
     }

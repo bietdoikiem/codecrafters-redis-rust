@@ -14,17 +14,19 @@ const BULK_STRING_DENOTE: char = '$';
 /// # Returns
 ///
 /// The string from stream's buffer
-pub fn get_stream_input_str(stream: &mut TcpStream) -> Option<String> {
-    let mut buffer: [u8; 1024] = [0; 1024];
+pub fn get_stream_input_str(stream: &mut TcpStream) -> Result<String, &str> {
+    let mut buffer: [u8; 512] = [0; 512];
     match stream.read(&mut buffer) {
         Ok(size) => {
+            if size == 0 {
+                return Err("client closed the connection");
+            }
             let input_cow_str = String::from_utf8_lossy(&buffer[..size]);
             let input_owned_str = input_cow_str.into_owned();
-            return Some(input_owned_str);
+            return Ok(input_owned_str);
         }
         Err(e) => {
-            println!("error parsing input: {}", e);
-            return None;
+            return Err("error parsing input");
         }
     }
 }
