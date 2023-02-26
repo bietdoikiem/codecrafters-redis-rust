@@ -1,37 +1,27 @@
-use std::io::Read;
-use std::net::TcpStream;
+use anyhow::Result;
+use bytes::BytesMut;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
 const CARRIAGE_RETURN: char = '\r';
 const ARRAY_DENOTE: char = '*';
 const BULK_STRING_DENOTE: char = '$';
+const BUFFER_SIZE_LIMIT: usize = 512; // in Megabytes
 
-/// Get input string from TCP stream
-///
-/// # Arguments
-///
-/// * `stream` - TCP Stream
-///
-/// # Returns
-///
-/// The string from stream's buffer
-pub fn get_stream_input_str(stream: &mut TcpStream) -> Result<String, &str> {
-    let mut buffer: [u8; 512] = [0; 512];
-    match stream.read(&mut buffer) {
-        Ok(size) => {
-            if size == 0 {
-                return Err("client closed the connection");
-            }
-            let input_cow_str = String::from_utf8_lossy(&buffer[..size]);
-            let input_owned_str = input_cow_str.into_owned();
-            return Ok(input_owned_str);
-        }
-        Err(e) => {
-            return Err("error parsing input");
-        }
-    }
+pub fn buf_to_string(buf: &mut BytesMut, size: usize) -> String {
+    let utf8_str = String::from_utf8_lossy(&buf[..size]);
+    return utf8_str.into_owned();
 }
 
 /// Deserialize array command
+///
+/// # Arguments
+///
+/// * `cmd` - Command string
+///
+/// # Returns
+///
+/// List of commands parsed from ReSP format
 pub fn deserialize_array_command(cmd: &String) -> Option<Vec<Option<String>>> {
     let cmd_len = cmd.len();
     if cmd_len == 0 {
@@ -124,16 +114,48 @@ pub fn deserialize_array_command(cmd: &String) -> Option<Vec<Option<String>>> {
     Some(cmd_array)
 }
 
+/// Handle TCP connection from client
+pub async fn handle_connection(mut stream: TcpStream) -> Result<()> {
+    let mut buf = BytesMut::with_capacity(BUFFER_SIZE_LIMIT);
+    loop {
+        let bytes_read = stream.read_buf(&mut buf).await?;
+        if bytes_read == 0 {
+            println!("Client closed the connection");
+            break;
+        }
+        // let cmd_str = buf_to_string(&mut buf, bytes_read);
+        // let cmd_array = deserialize_array_command(&cmd_str);
+        stream.write("+PONG\r\n".as_bytes()).await?;
+        buf.clear();
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod utils_tests {
     use super::deserialize_array_command;
 
     #[test]
     fn test_deserialize_array_command_successfully() {
-        let test_cmd = String::from("*3\r\n$4\r\nPING\r\n$4\r\nPONG\r\n");
+        let test_cmd = String::from("*2\r\n$4\r\nPING\r\n$4\r\nPONG\r\n");
         let expect_array: Vec<Option<String>> =
             vec![Some(String::from("PING")), Some(String::from("PONG"))];
         let cmd_array = deserialize_array_command(&test_cmd);
         assert_eq!(expect_array, cmd_array.unwrap());
+    }
+
+    #[test]
+    fn test_deserialize_array_2_commands_successfully() {
+        let test_cmd1 = String::from("*2\r\n$4\r\nPING\r\n$4\r\nPONG\r\n");
+        let expect_array1: Vec<Option<String>> =
+            vec![Some(String::from("PING")), Some(String::from("PONG"))];
+        let cmd_array1 = deserialize_array_command(&test_cmd1);
+        assert_eq!(expect_array1, cmd_array1.unwrap());
+
+        let expect_array2: Vec<Option<String>> = vec![Some(String::from("PING"))];
+        let test_cmd2 = String::from("*1\r\n$4\r\nPING\r\n");
+        let cmd_array2 = deserialize_array_command(&test_cmd2);
+        assert_eq!(expect_array2, cmd_array2.unwrap());
     }
 }
