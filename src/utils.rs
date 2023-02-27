@@ -114,6 +114,11 @@ pub fn deserialize_array_command(cmd: &String) -> Option<Vec<Option<String>>> {
     Some(cmd_array)
 }
 
+struct Command {
+    cmd: String,
+    args: Vec<String>,
+}
+
 /// Handle TCP connection from client
 pub async fn handle_connection(mut stream: TcpStream) -> Result<()> {
     let mut buf = BytesMut::with_capacity(BUFFER_SIZE_LIMIT);
@@ -123,13 +128,67 @@ pub async fn handle_connection(mut stream: TcpStream) -> Result<()> {
             println!("Client closed the connection");
             break;
         }
-        // let cmd_str = buf_to_string(&mut buf, bytes_read);
-        // let cmd_array = deserialize_array_command(&cmd_str);
-        stream.write("+PONG\r\n".as_bytes()).await?;
+        let cmd_str = buf_to_string(&mut buf, bytes_read);
+        match deserialize_array_command(&cmd_str) {
+            Some(cmd_array) => {
+                let cmd = parse_simple_cmd(cmd_array);
+                let main_cmd = cmd.cmd;
+                let first_arg = cmd.args.get(0);
+                match first_arg {
+                    Some(arg) => {
+                        if main_cmd.eq_ignore_ascii_case("ECHO") {
+                            stream.write(format!("+{arg}\r\n").as_bytes()).await?;
+                        } else {
+                            stream
+                                .write(format!("-ERR unknown command '{main_cmd}'\r\n").as_bytes())
+                                .await?;
+                        }
+                    }
+                    None => {
+                        if main_cmd.eq_ignore_ascii_case("PING") {
+                            stream.write(format!("+PONG\r\n").as_bytes()).await?;
+                        } else {
+                            stream
+                                .write(format!("-ERR unknown command '{main_cmd}'\r\n").as_bytes())
+                                .await?;
+                        }
+                    }
+                }
+            }
+            None => {
+                stream
+                    .write(format!("-ERR empty command\r\n").as_bytes())
+                    .await?;
+            }
+        }
         buf.clear();
     }
-
     Ok(())
+}
+
+/// Parse simple command with 1 argument only
+///
+/// # Arguments
+///
+/// * `cmd_array` - Command array (including argument)
+fn parse_simple_cmd(cmd_array: Vec<Option<String>>) -> Command {
+    let cmd_str = match cmd_array.get(0) {
+        Some(main_cmd) => main_cmd.as_ref().unwrap().to_string(),
+        None => {
+            panic!("Command is null");
+        }
+    };
+
+    match cmd_array.get(1) {
+        Some(arg) => Command {
+            cmd: cmd_str,
+            args: vec![arg.as_ref().unwrap().to_string()],
+        },
+        None => Command {
+            cmd: cmd_str,
+            args: vec![],
+        },
+    }
 }
 
 #[cfg(test)]
