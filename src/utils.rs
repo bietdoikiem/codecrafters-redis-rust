@@ -1,12 +1,20 @@
+use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use crate::store::Store;
 
 const CARRIAGE_RETURN: char = '\r';
 const ARRAY_DENOTE: char = '*';
 const BULK_STRING_DENOTE: char = '$';
+const SIMPLE_STRING_DENOTE: char = '+';
+const ERROR_DENOTE: char = '-';
+const NULL_DENOTE_STR: &str = "$-1";
 const BUFFER_SIZE_LIMIT: usize = 512; // in Megabytes
+const ERROR_UNKNOWN_COMMAND: &str = "ERR unknown command";
+const ERROR_EMPTY_COMMAND: &str = "ERR empty command";
+const CRLF: &str = "\r\n";
 
 pub fn buf_to_string(buf: &mut BytesMut, size: usize) -> String {
     let utf8_str = String::from_utf8_lossy(&buf[..size]);
@@ -120,7 +128,7 @@ struct Command {
 }
 
 /// Handle TCP connection from client
-pub async fn handle_connection(mut stream: TcpStream) -> Result<()> {
+pub async fn handle_connection(mut stream: TcpStream, client_store: Arc<Mutex<Store>>) -> Result<()> {
     let mut buf = BytesMut::with_capacity(BUFFER_SIZE_LIMIT);
     loop {
         let bytes_read = stream.read_buf(&mut buf).await?;
@@ -129,38 +137,50 @@ pub async fn handle_connection(mut stream: TcpStream) -> Result<()> {
             break;
         }
         let cmd_str = buf_to_string(&mut buf, bytes_read);
-        match deserialize_array_command(&cmd_str) {
+        let resp = match deserialize_array_command(&cmd_str) {
             Some(cmd_array) => {
                 let cmd = parse_simple_cmd(cmd_array);
                 let main_cmd = cmd.cmd;
-                let first_arg = cmd.args.get(0);
-                match first_arg {
-                    Some(arg) => {
-                        if main_cmd.eq_ignore_ascii_case("ECHO") {
-                            stream.write(format!("+{arg}\r\n").as_bytes()).await?;
+                match main_cmd.to_ascii_uppercase().as_str() {
+                    "PING" => {
+                        format!("{SIMPLE_STRING_DENOTE}PONG{CRLF}")
+                    },
+                    "ECHO" => {
+                        if let Some(echo_arg) = cmd.args.get(0) {
+                            format!("{SIMPLE_STRING_DENOTE}{echo_arg}{CRLF}")
                         } else {
-                            stream
-                                .write(format!("-ERR unknown command '{main_cmd}'\r\n").as_bytes())
-                                .await?;
+                            format!("{SIMPLE_STRING_DENOTE}{CRLF}")
                         }
                     }
-                    None => {
-                        if main_cmd.eq_ignore_ascii_case("PING") {
-                            stream.write(format!("+PONG\r\n").as_bytes()).await?;
+                    "SET" => {
+                        // SET [key] [value]
+                        if let (Some(key), Some(value)) = (cmd.args.get(0), cmd.args.get(1)) {
+                            client_store.lock().unwrap().set(key.clone(), value.clone());
+                            format!("{SIMPLE_STRING_DENOTE}OK{CRLF}")
                         } else {
-                            stream
-                                .write(format!("-ERR unknown command '{main_cmd}'\r\n").as_bytes())
-                                .await?;
+                            format!("{ERROR_DENOTE}SET requires two arguments{CRLF}")
                         }
                     }
+                    "GET" => {
+                        // GET [key]
+                        if let Some(key) = cmd.args.get(0) {
+                            if let Some(value) = client_store.lock().unwrap().get(key.clone()) {
+                                format!("{SIMPLE_STRING_DENOTE}{value}{CRLF}")
+                            } else {
+                                format!("{NULL_DENOTE_STR}{CRLF}")
+                            }
+                        } else {
+                            format!("{ERROR_DENOTE}GET requires one argument{CRLF}")
+                        }
+                    }
+                    _ => format!("{ERROR_DENOTE}{ERROR_UNKNOWN_COMMAND} '{main_cmd}'{CRLF}")
                 }
             }
             None => {
-                stream
-                    .write(format!("-ERR empty command\r\n").as_bytes())
-                    .await?;
+                format!("{ERROR_DENOTE}{ERROR_EMPTY_COMMAND}{CRLF}")
             }
-        }
+        };
+        stream.write(resp.as_bytes()).await?;
         buf.clear();
     }
     Ok(())
@@ -179,15 +199,16 @@ fn parse_simple_cmd(cmd_array: Vec<Option<String>>) -> Command {
         }
     };
 
-    match cmd_array.get(1) {
-        Some(arg) => Command {
-            cmd: cmd_str,
-            args: vec![arg.as_ref().unwrap().to_string()],
-        },
-        None => Command {
-            cmd: cmd_str,
-            args: vec![],
-        },
+    let mut cmd_args = vec![];
+
+    // Add arguments
+    for (_, arg) in cmd_array.iter().skip(1).enumerate() {
+        cmd_args.push(arg.as_ref().unwrap().to_string());
+    }
+
+    Command {
+        cmd: cmd_str,
+        args: cmd_args,
     }
 }
 
