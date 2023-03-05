@@ -1,5 +1,6 @@
 mod utils;
 mod store;
+mod cmd;
 
 use std::sync::{Arc, Mutex};
 use anyhow::Result;

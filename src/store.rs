@@ -1,5 +1,10 @@
 use std::collections::HashMap;
 
+pub struct StoreValue {
+    value: String,
+    expiry: usize,
+}
+
 pub struct Store {
     data: HashMap<String, String>,
 }
