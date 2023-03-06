@@ -1,3 +1,6 @@
+use std::sync::{Arc, Mutex};
+use crate::store::Store;
+
 const CARRIAGE_RETURN: char = '\r';
 const ARRAY_DENOTE: char = '*';
 const BULK_STRING_DENOTE: char = '$';
@@ -6,6 +9,9 @@ const ERROR_DENOTE: char = '-';
 const BULK_STRING_NULL_DENOTE: &str = "$-1";
 const NULL_DENOTE: &str = "-1";
 const CRLF: &str = "\r\n";
+
+const ERROR_UNKNOWN_COMMAND: &str = "ERR unknown command";
+const ERROR_EMPTY_COMMAND: &str = "ERR empty command";
 
 pub enum RespValue {
     SimpleString(String),
@@ -33,7 +39,7 @@ impl RespValue {
 /// # Returns
 ///
 /// List of commands parsed from ReSP format
-pub fn deserialize_array_command(cmd: &String) -> Option<Vec<Option<String>>> {
+pub fn deserialize_command_into_array(cmd: &String) -> Option<Vec<Option<String>>> {
     let cmd_len = cmd.len();
     if cmd_len == 0 {
         return None;
@@ -157,16 +163,73 @@ pub fn parse_cmd(cmd_array: Vec<Option<String>>) -> Command {
     }
 }
 
+
+
+/// Handle command RESP-format response
+///
+/// # Arguments
+///
+/// * `cmd`: Command
+pub fn handle_command_response(command: Command, client_store: &Arc<Mutex<Store>>) -> String {
+    let cmd = command.cmd;
+    match cmd.to_ascii_uppercase().as_str() {
+        "PING" => {
+            RespValue::SimpleString("PONG".to_string()).encode()
+        },
+        "ECHO" => {
+            let args = command.args;
+            if let Some(echo_arg) = args.get(0) {
+                RespValue::SimpleString(echo_arg.to_string()).encode()
+            } else {
+                RespValue::SimpleString("".to_string()).encode()
+            }
+        }
+        "SET" => {
+            // SET [key] [value]
+            let args = command.args;
+            if let (Some(key), Some(value)) = (args.get(0), args.get(1)) {
+
+                if let (Some(_), Some(expiry)) = (args.get(2), args.get(3)) {
+                    client_store.lock().unwrap().set_px(key.clone(), value.clone(), expiry.parse::<u64>().unwrap());
+                } else {
+                    client_store.lock().unwrap().set(key.clone(), value.clone());
+                }
+
+                RespValue::SimpleString("OK".to_string()).encode()
+            } else {
+                RespValue::Error("SET requires exactly two arguments".to_string()).encode()
+            }
+        }
+        "GET" => {
+            // GET [key]
+            let args = command.args;
+            if let Some(key) = args.get(0) {
+                if let Some(value) = client_store.lock().unwrap().get(key.clone()) {
+                    RespValue::SimpleString(value).encode()
+                } else {
+                    RespValue::SimpleString("-1".to_string()).encode()
+                }
+            } else {
+                RespValue::Error("GET requires exactly one argument".to_string()).encode()
+            }
+        }
+        _ => RespValue::Error(format!("{ERROR_UNKNOWN_COMMAND} '{cmd}'")).encode()
+    }
+}
+
+
+// --- TESTING ---
+
 #[cfg(test)]
 mod cmd_tests {
-    use super::deserialize_array_command;
+    use super::deserialize_command_into_array;
 
     #[test]
     fn test_deserialize_array_command_successfully() {
         let test_cmd = String::from("*2\r\n$4\r\nPING\r\n$4\r\nPONG\r\n");
         let expect_array: Vec<Option<String>> =
             vec![Some(String::from("PING")), Some(String::from("PONG"))];
-        let cmd_array = deserialize_array_command(&test_cmd);
+        let cmd_array = deserialize_command_into_array(&test_cmd);
         assert_eq!(expect_array, cmd_array.unwrap());
     }
 
@@ -175,12 +238,12 @@ mod cmd_tests {
         let test_cmd1 = String::from("*2\r\n$4\r\nPING\r\n$4\r\nPONG\r\n");
         let expect_array1: Vec<Option<String>> =
             vec![Some(String::from("PING")), Some(String::from("PONG"))];
-        let cmd_array1 = deserialize_array_command(&test_cmd1);
+        let cmd_array1 = deserialize_command_into_array(&test_cmd1);
         assert_eq!(expect_array1, cmd_array1.unwrap());
 
         let expect_array2: Vec<Option<String>> = vec![Some(String::from("PING"))];
         let test_cmd2 = String::from("*1\r\n$4\r\nPING\r\n");
-        let cmd_array2 = deserialize_array_command(&test_cmd2);
+        let cmd_array2 = deserialize_command_into_array(&test_cmd2);
         assert_eq!(expect_array2, cmd_array2.unwrap());
     }
 }

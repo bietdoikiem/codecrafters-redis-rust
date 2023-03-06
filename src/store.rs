@@ -1,12 +1,14 @@
 use std::collections::HashMap;
+use std::time::Duration;
+use tokio::time::Instant;
 
-pub struct StoreValue {
+pub struct Entry {
     value: String,
-    expiry: usize,
+    expiry: Option<Instant>,
 }
 
 pub struct Store {
-    data: HashMap<String, String>,
+    data: HashMap<String, Entry>,
 }
 
 impl Store {
@@ -17,10 +19,35 @@ impl Store {
     }
 
     pub fn set(&mut self, key: String, value: String) {
-        self.data.insert(key, value);
+        let entry = Entry {
+            value,
+            expiry: None
+        };
+        self.data.insert(key, entry);
+    }
+
+    pub fn set_px(&mut self, key: String, value: String, px: u64) {
+        let entry = Entry {
+            value,
+            expiry: Some(Instant::now() + Duration::from_millis(px)),
+        };
+        // TODO: Implement lazy deletion expired key
+        self.data.insert(key, entry);
     }
 
     pub fn get(&mut self, key: String) -> Option<String> {
-        self.data.get(key.as_str()).cloned()
+        match self.data.get(key.as_str()) {
+            Some(entry) => {
+                if let Some(expiry) = &entry.expiry {
+                    if Instant::now() > expiry.clone() {
+                        self.data.remove(key.as_str());
+                        return None;
+                    }
+                }
+
+                Some(entry.value.clone())
+            }
+            None => None
+        }
     }
 }

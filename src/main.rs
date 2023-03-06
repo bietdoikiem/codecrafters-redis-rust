@@ -1,11 +1,11 @@
-mod utils;
+mod connection;
 mod store;
 mod cmd;
 
 use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use tokio::net::TcpListener;
-use utils::handle_connection;
+use connection::handle_connection;
 use crate::store::Store;
 
 #[tokio::main]
