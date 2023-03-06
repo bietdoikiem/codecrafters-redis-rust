@@ -3,7 +3,7 @@ use anyhow::Result;
 use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use crate::cmd::{RespValue, deserialize_command_into_array, parse_cmd, handle_command_response};
+use crate::cmd::{deserialize_command_into_array, parse_cmd, handle_command_response};
 use crate::store::Store;
 
 const BUFFER_SIZE_LIMIT: usize = 512; // in MB

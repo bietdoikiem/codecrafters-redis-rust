@@ -6,12 +6,10 @@ const ARRAY_DENOTE: char = '*';
 const BULK_STRING_DENOTE: char = '$';
 const SIMPLE_STRING_DENOTE: char = '+';
 const ERROR_DENOTE: char = '-';
-const BULK_STRING_NULL_DENOTE: &str = "$-1";
 const NULL_DENOTE: &str = "-1";
 const CRLF: &str = "\r\n";
 
 const ERROR_UNKNOWN_COMMAND: &str = "ERR unknown command";
-const ERROR_EMPTY_COMMAND: &str = "ERR empty command";
 
 pub enum RespValue {
     SimpleString(String),
@@ -207,7 +205,7 @@ pub fn handle_command_response(command: Command, client_store: &Arc<Mutex<Store>
                 if let Some(value) = client_store.lock().unwrap().get(key.clone()) {
                     RespValue::SimpleString(value).encode()
                 } else {
-                    RespValue::SimpleString("-1".to_string()).encode()
+                    RespValue::BulkString(NULL_DENOTE.to_string()).encode()
                 }
             } else {
                 RespValue::Error("GET requires exactly one argument".to_string()).encode()
